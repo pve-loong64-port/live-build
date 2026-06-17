@@ -72,26 +72,49 @@ EOF
 
 # Build the core image.
 (cd "$workdir"; tar -cf - boot) >"$memdisk_img"
-grub-mkimage -O "$platform" -m "$memdisk_img" \
-	-o "$workdir/boot$efi_name.efi" -p '(memdisk)/boot/grub' \
-	search iso9660 configfile normal memdisk tar ${PARTITIONLIST} fat
+if [ "${platform}" = "loongarch64-efi" ]; then
+    grub-mkimage -O "$platform" -m "$memdisk_img" \
+            -o "$workdir/BOOT$efi_name.EFI" -p '(memdisk)/boot/grub' \
+            search iso9660 configfile normal memdisk tar ${PARTITIONLIST} fat
 
-grub-mkimage -O "$platform" \
-	-o "$outdir/bootnet$efi_name.efi" -p "$netboot_prefix/grub" \
-	search configfile normal efinet tftp net
+    grub-mkimage -O "$platform" \
+            -o "$outdir/BOOTNET$efi_name.EFI" -p "$netboot_prefix/grub" \
+            search configfile normal efinet tftp net
+else
+    grub-mkimage -O "$platform" -m "$memdisk_img" \
+            -o "$workdir/boot$efi_name.efi" -p '(memdisk)/boot/grub' \
+            search iso9660 configfile normal memdisk tar ${PARTITIONLIST} fat
 
+    grub-mkimage -O "$platform" \
+            -o "$outdir/bootnet$efi_name.efi" -p "$netboot_prefix/grub" \
+            search configfile normal efinet tftp net
+fi
 # Stuff it into a FAT filesystem, making it as small as possible.  24KiB
 # headroom seems to be enough; (x+31)/32*32 rounds up to multiple of 32.
 # The VOLID must be (truncated to) a 32bit hexadecimal number
-mkfs.msdos -C "$outdir/efi.img" \
-	$(( ($(stat -c %s "$workdir/boot$efi_name.efi") / 1024 + 55) \
-	    / 32 * 32 )) -i $(printf "%08x" $((${SOURCE_DATE_EPOCH}%4294967296)))
-mmd -i "$outdir/efi.img" ::efi
-mmd -i "$outdir/efi.img" ::efi/boot
+if [ "${platform}" = "loongarch64-efi" ]; then
+    mkfs.msdos -C "$outdir/efi.img" \
+            $(( ($(stat -c %s "$workdir/BOOT$efi_name.EFI") / 1024 + 55) \
+                / 32 * 32 )) -i $(printf "%08x" $((${SOURCE_DATE_EPOCH}%4294967296)))
+    mmd -i "$outdir/efi.img" ::EFI
+    mmd -i "$outdir/efi.img" ::EFI/BOOT
+else
+    mkfs.msdos -C "$outdir/efi.img" \
+            $(( ($(stat -c %s "$workdir/boot$efi_name.efi") / 1024 + 55) \
+                / 32 * 32 )) -i $(printf "%08x" $((${SOURCE_DATE_EPOCH}%4294967296)))
+    mmd -i "$outdir/efi.img" ::efi
+    mmd -i "$outdir/efi.img" ::efi/boot
+fi
 # Set the timestamp of the .efi file
-touch "$workdir/boot$efi_name.efi" -d@${SOURCE_DATE_EPOCH}
-mcopy -m -i "$outdir/efi.img" "$workdir/boot$efi_name.efi" \
-	"::efi/boot/boot$efi_name.efi"
+if [ "${platform}" = "loongarch64-efi" ]; then
+    touch "$workdir/BOOT$efi_name.EFI" -d@${SOURCE_DATE_EPOCH}
+    mcopy -m -i "$outdir/efi.img" "$workdir/BOOT$efi_name.EFI" \
+            "::EFI/BOOT/BOOT$efi_name.EFI"
+else
+    touch "$workdir/boot$efi_name.efi" -d@${SOURCE_DATE_EPOCH}
+    mcopy -m -i "$outdir/efi.img" "$workdir/boot$efi_name.efi" \
+            "::efi/boot/boot$efi_name.efi"
+fi
 
 grub-cpmodules "$outdir" "$platform"
 cp -a /usr/share/grub/unicode.pf2 "$outdir/boot/grub/"

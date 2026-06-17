@@ -54,6 +54,9 @@ case "${LB_ARCHITECTURE}" in
 	armhf)
 		Check_package chroot /usr/lib/grub/arm-efi/configfile.mod grub-efi-arm-bin
 		;;
+	loong64)
+		Check_package chroot /usr/lib/grub/loongarch64-efi/configfile.mod grub-efi-loong64-bin
+		;;
 esac
 Check_package chroot /usr/bin/grub-mkimage grub-common
 Check_package chroot /usr/bin/mcopy mtools
@@ -136,7 +139,7 @@ case "${LB_UEFI_SECURE_BOOT}" in
 esac
 
 # Cleanup files that we generate
-rm -rf binary/boot/efi.img binary/boot/grub/i386-efi/ binary/boot/grub/x86_64-efi binary/boot/grub/arm64-efi binary/boot/grub/arm-efi
+rm -rf binary/boot/efi.img binary/boot/grub/i386-efi/ binary/boot/grub/x86_64-efi binary/boot/grub/arm64-efi binary/boot/grub/arm-efi binary/boot/grub/loongarch64-efi
 
 # This is workaround till both efi-image and grub-cpmodules are put into a binary package
 case "${LB_BUILD_WITH_CHROOT}" in
@@ -169,8 +172,13 @@ gen_efi_boot_img(){
 	local netboot_prefix="\$3"
 	local outdir="grub-efi-temp-\${platform}"
 	"\${LIVE_BUILD_PATH}/efi-image" "${_CHROOT_DIR}/\$outdir" "\$platform" "\$efi_name" "\$netboot_prefix"
-	mkdir -p ${_CHROOT_DIR}/grub-efi-temp/EFI/boot
-	mcopy -m -n -i ${_CHROOT_DIR}/\$outdir/efi.img '::efi/boot/boot*.efi' ${_CHROOT_DIR}/grub-efi-temp/EFI/boot
+        if [ "${LB_ARCHITECTURE}" = "loong64" ]; then
+            mkdir -p ${_CHROOT_DIR}/grub-efi-temp/EFI/BOOT
+            mcopy -m -n -i ${_CHROOT_DIR}/\$outdir/efi.img '::EFI/BOOT/BOOT*.EFI' ${_CHROOT_DIR}/grub-efi-temp/EFI/BOOT
+        else
+            mkdir -p ${_CHROOT_DIR}/grub-efi-temp/EFI/boot
+            mcopy -m -n -i ${_CHROOT_DIR}/\$outdir/efi.img '::efi/boot/boot*.efi' ${_CHROOT_DIR}/grub-efi-temp/EFI/boot
+        fi
 	cp -a "${_CHROOT_DIR}"/\$outdir/* "${_CHROOT_DIR}/grub-efi-temp/"
 
 	# Secure Boot support:
@@ -243,6 +251,10 @@ case "${LB_ARCHITECTURE}" in
 		gen_efi_boot_img "arm-efi" "arm" "debian-live/arm"
 		PATH="\${PRE_EFI_IMAGE_PATH}"
 		;;
+	loong64)
+		gen_efi_boot_img "loongarch64-efi" "LOONGARCH64" "debian-live/loong64"
+		PATH="\${PRE_EFI_IMAGE_PATH}"
+		;;
 esac
 
 
@@ -272,10 +284,17 @@ touch ${_CHROOT_DIR}/grub-efi-temp-cfg/grub.cfg -d@${SOURCE_DATE_EPOCH}
 # the case of a multi-arch amd64/i386 image
 
 size=0
-for file in ${_CHROOT_DIR}/grub-efi-temp/EFI/boot/*.efi \
-		${_CHROOT_DIR}/grub-efi-temp-cfg/grub.cfg; do
-	size=\$((\$size + \$(stat -c %s "\$file")))
-done
+if [ "${LB_ARCHITECTURE}" = "loong64" ]; then
+    for file in ${_CHROOT_DIR}/grub-efi-temp/EFI/BOOT/*.EFI \
+                    ${_CHROOT_DIR}/grub-efi-temp-cfg/grub.cfg; do
+            size=\$((\$size + \$(stat -c %s "\$file")))
+    done
+else
+    for file in ${_CHROOT_DIR}/grub-efi-temp/EFI/boot/*.efi \
+                    ${_CHROOT_DIR}/grub-efi-temp-cfg/grub.cfg; do
+            size=\$((\$size + \$(stat -c %s "\$file")))
+    done
+fi
 
 # directories: EFI EFI/boot boot boot/grub
 size=\$((\$size + 4096 * 4))
@@ -285,10 +304,17 @@ blocks=\$(((\$size / 1024 + 55) / 32 * 32 ))
 rm -f ${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img
 # The VOLID must be (truncated to) a 32bit hexadecimal number
 mkfs.msdos -C "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" \$blocks -i $(printf "%08x" $((${SOURCE_DATE_EPOCH}%4294967296))) >/dev/null
-mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI
-mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI/boot
-mcopy -m -o -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ${_CHROOT_DIR}/grub-efi-temp/EFI/boot/*.efi \
-	"::EFI/boot"
+if [ "${LB_ARCHITECTURE}" = "loong64" ]; then
+    mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI
+    mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI/BOOT
+    mcopy -m -o -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ${_CHROOT_DIR}/grub-efi-temp/EFI/BOOT/*.EFI \
+            "::EFI/boot"
+else
+    mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI
+    mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::EFI/boot
+    mcopy -m -o -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ${_CHROOT_DIR}/grub-efi-temp/EFI/boot/*.efi \
+            "::EFI/boot"
+fi
 
 mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::boot
 mmd -i "${_CHROOT_DIR}/grub-efi-temp/boot/grub/efi.img" ::boot/grub
@@ -324,6 +350,7 @@ rm -f chroot/grub-efi-temp/bootnetia32.efi
 rm -f chroot/grub-efi-temp/bootnetx64.efi
 rm -f chroot/grub-efi-temp/bootnetaa64.efi
 rm -f chroot/grub-efi-temp/bootnetarm.efi
+rm -f chroot/grub-efi-temp/BOOTNETLOONGARCH64.EFI
 
 mkdir -p binary
 cp -a chroot/grub-efi-temp/* binary/
@@ -331,6 +358,7 @@ rm -rf chroot/grub-efi-temp-x86_64-efi
 rm -rf chroot/grub-efi-temp-i386-efi
 rm -rf chroot/grub-efi-temp-arm64-efi
 rm -rf chroot/grub-efi-temp-arm-efi
+rm -rf chroot/grub-efi-temp-loongarch64-efi
 rm -rf chroot/grub-efi-temp-cfg
 rm -rf chroot/grub-efi-temp
 
